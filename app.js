@@ -1522,6 +1522,11 @@ function loadAccountState(email) {
 
 // ── Facebook JS SDK loader (lazy, once) ──────────────────
 let fbSdkReady = null;
+// TRUE only after FB.init() has been called — NOT just after the script loads.
+// window.FB exists as soon as the script is parsed, but FB.login() throws
+// "called before FB.init()" until fbAsyncInit runs.
+let fbInitialized = false;
+
 function loadFacebookSDK() {
   if (fbSdkReady) return fbSdkReady;
   if (!CFG.FACEBOOK_APP_ID || CFG.FACEBOOK_APP_ID.startsWith('__')) {
@@ -1535,6 +1540,7 @@ function loadFacebookSDK() {
         xfbml: false,
         version: 'v21.0',
       });
+      fbInitialized = true;   // ← mark as fully ready AFTER init
       resolve(window.FB);
     };
     const s = document.createElement('script');
@@ -1618,8 +1624,8 @@ function mountTelegramWidget() {
 // NOTE: must NOT await anything before FB.login() — browser blocks popups
 // if the call stack is broken by an async operation.
 function loginWithFacebook() {
-  if (!window.FB) {
-    return Promise.reject(new Error('Facebook SDK not ready — please try again in a moment'));
+  if (!fbInitialized) {
+    return Promise.reject(new Error('Facebook SDK not ready — please try again'));
   }
   return new Promise((resolve, reject) => {
     window.FB.login((resp) => {
@@ -1645,8 +1651,8 @@ function loginWithFacebook() {
 // NOTE: must NOT await anything before FB.login() — browser blocks popups
 // if the call stack is broken by an async operation.
 function loginWithInstagram() {
-  if (!window.FB) {
-    return Promise.reject(new Error('Facebook SDK not ready — please try again in a moment'));
+  if (!fbInitialized) {
+    return Promise.reject(new Error('Facebook SDK not ready — please try again'));
   }
   return new Promise((resolve, reject) => {
     window.FB.login((resp) => {
@@ -1695,19 +1701,22 @@ document.getElementById('detail-connect-btn')?.addEventListener('click', async (
     if (!CFG.FACEBOOK_APP_ID || CFG.FACEBOOK_APP_ID.startsWith('__')) {
       return showError('FACEBOOK_APP_ID not set in oauth-config.js');
     }
-    // If SDK not yet ready, load it now and prompt user to click again
-    if (!window.FB) {
+    // fbInitialized is true only after FB.init() has run.
+    // If not ready yet, await the SDK (first click), then ask user to click again.
+    // Second click: fbInitialized=true → go straight to FB.login() synchronously.
+    if (!fbInitialized) {
       showLoading(p.name);
       try { await loadFacebookSDK(); } catch(e) { showError(sanitizeError(e)); return; }
       showModalStep('detail');
-      showToast('SDK ready — please click Connect again', 'info');
+      showToast('Ready — please click Connect again', 'info');
       return;
     }
     showLoading(p.name);
     try {
-      const data = await loginWithFacebook();
-      saveOAuth('facebook', data);
-      showSuccessAndClose('Facebook', data.name);
+      const data = loginWithFacebook();        // no await — FB.login() must be sync
+      const result = await data;
+      saveOAuth('facebook', result);
+      showSuccessAndClose('Facebook', result.name);
     } catch (e) { showError(sanitizeError(e)); }
     return;
   }
@@ -1717,19 +1726,20 @@ document.getElementById('detail-connect-btn')?.addEventListener('click', async (
     if (!CFG.FACEBOOK_APP_ID || CFG.FACEBOOK_APP_ID.startsWith('__')) {
       return showError('FACEBOOK_APP_ID not set in oauth-config.js');
     }
-    // If SDK not yet ready, load it now and prompt user to click again
-    if (!window.FB) {
+    // Same pattern as Facebook above
+    if (!fbInitialized) {
       showLoading(p.name);
       try { await loadFacebookSDK(); } catch(e) { showError(sanitizeError(e)); return; }
       showModalStep('detail');
-      showToast('SDK ready — please click Connect again', 'info');
+      showToast('Ready — please click Connect again', 'info');
       return;
     }
     showLoading(p.name);
     try {
-      const data = await loginWithInstagram();
-      saveOAuth('instagram', data);
-      showSuccessAndClose('Instagram', data.username);
+      const data = loginWithInstagram();       // no await — FB.login() must be sync
+      const result = await data;
+      saveOAuth('instagram', result);
+      showSuccessAndClose('Instagram', result.username);
     } catch (e) { showError(sanitizeError(e)); }
     return;
   }
