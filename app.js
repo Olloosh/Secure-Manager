@@ -1525,7 +1525,7 @@ let fbSdkReady = null;
 function loadFacebookSDK() {
   if (fbSdkReady) return fbSdkReady;
   if (!CFG.FACEBOOK_APP_ID || CFG.FACEBOOK_APP_ID.startsWith('__')) {
-    return Promise.reject(new Error('Facebook App ID not configured. Add FACEBOOK_APP_ID in your hosting environment variables.'));
+    return Promise.reject(new Error('Facebook App ID not configured.'));
   }
   fbSdkReady = new Promise((resolve) => {
     window.fbAsyncInit = function () {
@@ -1545,7 +1545,7 @@ function loadFacebookSDK() {
   return fbSdkReady;
 }
 
-// ── Telegram OAuth popup (Facebook-style) ───────────────
+// ── Telegram Login Widget (popup-based) ──────────────────
 function mountTelegramWidget() {
   const slot    = document.getElementById('telegram-widget-slot');
   const warn    = document.getElementById('detail-config-warn');
@@ -1555,34 +1555,63 @@ function mountTelegramWidget() {
   if (warn)    warn.classList.add('hidden');
   if (mainBtn) mainBtn.style.display = 'none';
   slot.classList.remove('hidden');
+  slot.innerHTML = '';
 
-  const botId = CFG.TELEGRAM_BOT_ID;
+  const botUsername = CFG.TELEGRAM_BOT_USERNAME;
+  const botId       = CFG.TELEGRAM_BOT_ID;
+  const configured  = botUsername && !botUsername.startsWith('__') &&
+                      botId       && !botId.startsWith('__');
 
-  // Show error if config not injected yet
-  if (!botId || botId.startsWith('__')) {
-    slot.innerHTML = `<p style="color:#ef4444;font-size:0.85rem;margin-top:0.75rem;padding:0.75rem;background:#fef2f2;border-radius:8px;">
-      ⚠️ Telegram Bot ID not configured — add the <b>TG_BOT_ID</b> env var in your Netlify dashboard and redeploy.
-    </p>`;
+  if (!configured) {
+    // Fallback: manual bot token + channel input
+    slot.innerHTML = `
+      <div style="margin-top:1rem;display:flex;flex-direction:column;gap:0.75rem;">
+        <input id="tg-manual-token"   placeholder="Bot Token (from @BotFather)"
+          style="padding:0.75rem;border-radius:8px;border:1px solid #444;background:#1e1e2e;color:#fff;font-size:0.9rem;width:100%;box-sizing:border-box;">
+        <input id="tg-manual-channel" placeholder="Channel username (e.g. @mychannel)"
+          style="padding:0.75rem;border-radius:8px;border:1px solid #444;background:#1e1e2e;color:#fff;font-size:0.9rem;width:100%;box-sizing:border-box;">
+        <button id="tg-manual-btn" style="
+          display:flex;align-items:center;justify-content:center;gap:0.6rem;
+          width:100%;padding:0.85rem 1.2rem;
+          background:#29B6F6;color:#fff;border:none;border-radius:10px;
+          font-size:1rem;font-weight:600;cursor:pointer;">
+          <img src="https://cdn.jsdelivr.net/npm/simple-icons@14/icons/telegram.svg" style="width:20px;height:20px;filter:brightness(0) invert(1);">
+          Connect Telegram
+        </button>
+      </div>`;
+    document.getElementById('tg-manual-btn').addEventListener('click', () => {
+      const token   = document.getElementById('tg-manual-token').value.trim();
+      const channel = document.getElementById('tg-manual-channel').value.trim();
+      if (!token || !channel) { showToast('Enter bot token and channel', 'warning'); return; }
+      saveOAuth('telegram', { access_token: token, channel, username: channel });
+      showSuccessAndClose('Telegram', channel);
+    });
     return;
   }
 
-  const origin   = window.location.origin;
-  const returnTo = encodeURIComponent(origin + '/?tg_auth=1');
-  const url      = `https://oauth.telegram.org/auth?bot_id=${botId}&origin=${encodeURIComponent(origin)}&embed=1&request_access=write&return_to=${returnTo}`;
+  // Official Telegram Login Widget — opens popup, calls onTelegramAuth on success
+  window.onTelegramAuth = function(user) {
+    saveOAuth('telegram', {
+      access_token: user.hash,
+      user_id:      String(user.id),
+      username:     user.username || user.first_name,
+      avatar:       user.photo_url,
+    });
+    showSuccessAndClose('Telegram', user.username || user.first_name);
+  };
 
-  slot.innerHTML = `
-    <button id="tg-popup-btn" style="
-      display:flex;align-items:center;justify-content:center;gap:0.6rem;
-      width:100%;padding:0.85rem 1.2rem;margin-top:1rem;
-      background:#29B6F6;color:#fff;border:none;border-radius:10px;
-      font-size:1rem;font-weight:600;cursor:pointer;">
-      <img src="https://cdn.jsdelivr.net/npm/simple-icons@14/icons/telegram.svg" style="width:20px;height:20px;filter:brightness(0) invert(1);">
-      Connect Telegram account
-    </button>`;
+  const wrapper = document.createElement('div');
+  wrapper.style.cssText = 'margin-top:1rem;display:flex;justify-content:center;';
+  slot.appendChild(wrapper);
 
-  document.getElementById('tg-popup-btn').addEventListener('click', () => {
-    window.location.href = url;
-  });
+  const script = document.createElement('script');
+  script.async = true;
+  script.src   = 'https://telegram.org/js/telegram-widget.js?22';
+  script.setAttribute('data-telegram-login',   botUsername);
+  script.setAttribute('data-size',             'large');
+  script.setAttribute('data-onauth',           'onTelegramAuth(user)');
+  script.setAttribute('data-request-access',   'write');
+  wrapper.appendChild(script);
 }
 
 // ── Facebook login flow ──────────────────────────────────
@@ -1655,7 +1684,6 @@ document.getElementById('detail-connect-btn')?.addEventListener('click', async (
 
   // FACEBOOK
   if (p.id === 'facebook') {
-    if (!CFG.FACEBOOK_APP_ID || CFG.FACEBOOK_APP_ID.startsWith('__')) return showError('Facebook App ID not configured. Contact the administrator.');
     showLoading(p.name);
     try {
       const data = await loginWithFacebook();
@@ -1667,7 +1695,6 @@ document.getElementById('detail-connect-btn')?.addEventListener('click', async (
 
   // INSTAGRAM
   if (p.id === 'instagram') {
-    if (!CFG.FACEBOOK_APP_ID || CFG.FACEBOOK_APP_ID.startsWith('__')) return showError('Facebook App ID not configured. Contact the administrator.');
     showLoading(p.name);
     try {
       const data = await loginWithInstagram();
