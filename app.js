@@ -1524,8 +1524,8 @@ function loadAccountState(email) {
 let fbSdkReady = null;
 function loadFacebookSDK() {
   if (fbSdkReady) return fbSdkReady;
-  if (!CFG.FACEBOOK_APP_ID) {
-    return Promise.reject(new Error('FACEBOOK_APP_ID not set in oauth-config.js'));
+  if (!CFG.FACEBOOK_APP_ID || CFG.FACEBOOK_APP_ID.startsWith('__')) {
+    return Promise.reject(new Error('Facebook App ID not configured. Add FACEBOOK_APP_ID in your hosting environment variables.'));
   }
   fbSdkReady = new Promise((resolve) => {
     window.fbAsyncInit = function () {
@@ -1655,7 +1655,7 @@ document.getElementById('detail-connect-btn')?.addEventListener('click', async (
 
   // FACEBOOK
   if (p.id === 'facebook') {
-    if (!CFG.FACEBOOK_APP_ID) return showError('FACEBOOK_APP_ID not set in oauth-config.js');
+    if (!CFG.FACEBOOK_APP_ID || CFG.FACEBOOK_APP_ID.startsWith('__')) return showError('Facebook App ID not configured. Contact the administrator.');
     showLoading(p.name);
     try {
       const data = await loginWithFacebook();
@@ -1667,7 +1667,7 @@ document.getElementById('detail-connect-btn')?.addEventListener('click', async (
 
   // INSTAGRAM
   if (p.id === 'instagram') {
-    if (!CFG.FACEBOOK_APP_ID) return showError('FACEBOOK_APP_ID not set in oauth-config.js');
+    if (!CFG.FACEBOOK_APP_ID || CFG.FACEBOOK_APP_ID.startsWith('__')) return showError('Facebook App ID not configured. Contact the administrator.');
     showLoading(p.name);
     try {
       const data = await loginWithInstagram();
