@@ -1615,14 +1615,18 @@ function mountTelegramWidget() {
 }
 
 // ── Facebook login flow ──────────────────────────────────
-async function loginWithFacebook() {
-  const FB = await loadFacebookSDK();
+// NOTE: must NOT await anything before FB.login() — browser blocks popups
+// if the call stack is broken by an async operation.
+function loginWithFacebook() {
+  if (!window.FB) {
+    return Promise.reject(new Error('Facebook SDK not ready — please try again in a moment'));
+  }
   return new Promise((resolve, reject) => {
-    FB.login((resp) => {
+    window.FB.login((resp) => {
       if (resp.status !== 'connected') return reject(new Error('Facebook login cancelled'));
       const token = resp.authResponse.accessToken;
-      FB.api('/me', { fields: 'id,name,email,picture' }, (me) => {
-        FB.api('/me/accounts', { fields: 'id,name,access_token,category' }, (pages) => {
+      window.FB.api('/me', { fields: 'id,name,email,picture' }, (me) => {
+        window.FB.api('/me/accounts', { fields: 'id,name,access_token,category' }, (pages) => {
           resolve({
             access_token: token,
             user_id:      me.id,
@@ -1638,13 +1642,17 @@ async function loginWithFacebook() {
 }
 
 // ── Instagram login flow (via Facebook SDK) ──────────────
-async function loginWithInstagram() {
-  const FB = await loadFacebookSDK();
+// NOTE: must NOT await anything before FB.login() — browser blocks popups
+// if the call stack is broken by an async operation.
+function loginWithInstagram() {
+  if (!window.FB) {
+    return Promise.reject(new Error('Facebook SDK not ready — please try again in a moment'));
+  }
   return new Promise((resolve, reject) => {
-    FB.login((resp) => {
+    window.FB.login((resp) => {
       if (resp.status !== 'connected') return reject(new Error('Instagram login cancelled'));
       const token = resp.authResponse.accessToken;
-      FB.api('/me', { fields: 'id,name,picture' }, (me) => {
+      window.FB.api('/me', { fields: 'id,name,picture' }, (me) => {
         if (!me || me.error) return reject(new Error(me?.error?.message || 'FB API error'));
         resolve({
           access_token: token,
@@ -1684,6 +1692,17 @@ document.getElementById('detail-connect-btn')?.addEventListener('click', async (
 
   // FACEBOOK
   if (p.id === 'facebook') {
+    if (!CFG.FACEBOOK_APP_ID || CFG.FACEBOOK_APP_ID.startsWith('__')) {
+      return showError('FACEBOOK_APP_ID not set in oauth-config.js');
+    }
+    // If SDK not yet ready, load it now and prompt user to click again
+    if (!window.FB) {
+      showLoading(p.name);
+      try { await loadFacebookSDK(); } catch(e) { showError(sanitizeError(e)); return; }
+      showModalStep('detail');
+      showToast('SDK ready — please click Connect again', 'info');
+      return;
+    }
     showLoading(p.name);
     try {
       const data = await loginWithFacebook();
@@ -1695,6 +1714,17 @@ document.getElementById('detail-connect-btn')?.addEventListener('click', async (
 
   // INSTAGRAM
   if (p.id === 'instagram') {
+    if (!CFG.FACEBOOK_APP_ID || CFG.FACEBOOK_APP_ID.startsWith('__')) {
+      return showError('FACEBOOK_APP_ID not set in oauth-config.js');
+    }
+    // If SDK not yet ready, load it now and prompt user to click again
+    if (!window.FB) {
+      showLoading(p.name);
+      try { await loadFacebookSDK(); } catch(e) { showError(sanitizeError(e)); return; }
+      showModalStep('detail');
+      showToast('SDK ready — please click Connect again', 'info');
+      return;
+    }
     showLoading(p.name);
     try {
       const data = await loginWithInstagram();
@@ -2112,6 +2142,13 @@ document.addEventListener('DOMContentLoaded', async () => {
   await seedAdmin();
   // Remove legacy unscoped OAuth key (security: was storing all tokens in one global key)
   localStorage.removeItem('ssm_oauth');
+
+  // Pre-load Facebook SDK in the background so window.FB is ready before
+  // the user clicks "Connect Instagram / Facebook". FB.login() must be called
+  // synchronously inside a click — any await before it breaks popup permission.
+  if (CFG.FACEBOOK_APP_ID && !CFG.FACEBOOK_APP_ID.startsWith('__')) {
+    loadFacebookSDK().catch(() => {}); // silent — errors surface at connect time
+  }
 
   // Auto-login if a session exists and user is still registered
   const sessionEmail = getSession();
